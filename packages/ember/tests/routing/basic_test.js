@@ -2138,7 +2138,7 @@ test("The rootURL is passed properly to the location implementation", function()
     rootURL: rootURL,
     // if we transition in this test we will receive failures
     // if the tests are run from a static file
-    _doTransition: function(){}
+    _doURLTransition: function(){}
   });
 
   bootApplication();

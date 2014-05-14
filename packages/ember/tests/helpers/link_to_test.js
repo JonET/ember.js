@@ -453,40 +453,40 @@ if(Ember.FEATURES.isEnabled('ember-routing-linkto-target-attribute')) {
   test("The {{link-to}} helper supports `target` attribute", function() {
     Ember.TEMPLATES.index = Ember.Handlebars.compile("<h3>Home</h3>{{#link-to 'index' id='self-link' target='_blank'}}Self{{/link-to}}");
     bootApplication();
-    
+
     Ember.run(function() {
       router.handleURL("/");
     });
-    
+
     var link = Ember.$('#self-link', '#qunit-fixture');
     equal(link.attr('target'), '_blank', "The self-link contains `target` attribute");
   });
-  
+
   test("The {{link-to}} helper does not call preventDefault if `target` attribute is provided", function() {
     Ember.TEMPLATES.index = Ember.Handlebars.compile("<h3>Home</h3>{{#link-to 'index' id='self-link' target='_blank'}}Self{{/link-to}}");
     bootApplication();
-    
+
     Ember.run(function() {
       router.handleURL("/");
     });
-    
+
     var event = Ember.$.Event("click");
     Ember.$('#self-link', '#qunit-fixture').trigger(event);
-    
+
     equal(event.isDefaultPrevented(), false, "should not preventDefault when target attribute is specified");
   });
 
   test("The {{link-to}} helper should preventDefault when `target = _self`", function() {
     Ember.TEMPLATES.index = Ember.Handlebars.compile("<h3>Home</h3>{{#link-to 'index' id='self-link' target='_self'}}Self{{/link-to}}");
     bootApplication();
-    
+
     Ember.run(function() {
       router.handleURL("/");
     });
-    
+
     var event = Ember.$.Event("click");
     Ember.$('#self-link', '#qunit-fixture').trigger(event);
-    
+
     equal(event.isDefaultPrevented(), true, "should preventDefault when target attribute is `_self`");
   });
 }
@@ -522,9 +522,7 @@ test("Issue 4201 - Shorthand for route.index shouldn't throw errors about contex
   expect(2);
   Router.map(function() {
     this.resource('lobby', function() {
-      this.route('index', {
-        path: ':lobby_id'
-      });
+      this.route('index', { path: ':lobby_id' });
       this.route('list');
     });
   });
@@ -1252,13 +1250,11 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     deepEqual(indexController.getProperties('foo', 'bar'), { foo: '123', bar: 'abc' }, "controller QP properties not");
   });
 
-  test("doesn't update controller QP properties on current route when invoked (inferred route)", function() {
+  test("link-to with no params throws", function() {
     Ember.TEMPLATES.index = Ember.Handlebars.compile("{{#link-to id='the-link'}}Index{{/link-to}}");
-    bootApplication();
-
-    Ember.run(Ember.$('#the-link'), 'click');
-    var indexController = container.lookup('controller:index');
-    deepEqual(indexController.getProperties('foo', 'bar'), { foo: '123', bar: 'abc' }, "controller QP properties not");
+    expectAssertion(function() {
+      bootApplication();
+    }, /one or more/);
   });
 
   test("doesn't update controller QP properties on current route when invoked (empty query-params obj, inferred route)", function() {
@@ -1358,7 +1354,6 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       "{{#link-to (query-params search='same' archive=true) id='both-same'}}Index{{/link-to}} " +
       "{{#link-to (query-params search='different' archive=true) id='change-one'}}Index{{/link-to}} " +
       "{{#link-to (query-params search='different' archive=false) id='remove-one'}}Index{{/link-to}} " +
-      "{{#link-to id='change-nothing'}}Index{{/link-to}} " +
       "{{outlet}}"
     );
 
@@ -1371,8 +1366,6 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       "{{#link-to (query-params search='change' sort='title') id='change-search-same-sort-child-and-parent'}}Index{{/link-to}} " +
       "{{#link-to (query-params foo='dog') id='dog-link'}}Index{{/link-to}} "
     );
-
-
 
     Router.map(function() {
       this.resource("search", function() {
@@ -1414,17 +1407,19 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     shouldNotBeActive('#same-search-add-archive');
     shouldNotBeActive('#only-add-archive');
     shouldNotBeActive('#remove-one');
-    shouldBeActive('#change-nothing');
 
     Ember.run(function() {
-      router.handleURL("/search?search=same&archive");
+      router.handleURL("/search?search=same&archive=true");
     });
     shouldBeActive('#both-same');
     shouldNotBeActive('#change-one');
 
     //Nested Controllers
     Ember.run(function() {
-      router.handleURL("/search/results?search=same&sort=title&showDetails");
+      // Note: this is kind of a strange case; sort's default value is 'title',
+      // so this URL shouldn't have been generated in the first place, but
+      // we should also be able to gracefully handle these cases.
+      router.handleURL("/search/results?search=same&sort=title&showDetails=true");
     });
     shouldBeActive('#same-sort-child-only');
     shouldBeActive('#same-search-parent-only');
@@ -1432,26 +1427,23 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     shouldBeActive('#same-search-same-sort-child-and-parent');
     shouldNotBeActive('#same-search-different-sort-child-and-parent');
     shouldNotBeActive('#change-search-same-sort-child-and-parent');
-
-
   });
 
   test("The {{link-to}} applies active class when query-param is number", function() {
-      Ember.TEMPLATES.index = Ember.Handlebars.compile(
-        "{{#link-to (query-params page=pageNumber) id='page-link'}}Index{{/link-to}} ");
+    Ember.TEMPLATES.index = Ember.Handlebars.compile(
+      "{{#link-to (query-params page=pageNumber) id='page-link'}}Index{{/link-to}} ");
 
-      App.IndexController = Ember.Controller.extend({
-        queryParams: ['page'],
-        page: 1,
-        pageNumber: 5
-      });
+    App.IndexController = Ember.Controller.extend({
+      queryParams: ['page'],
+      page: 1,
+      pageNumber: 5
+    });
 
-      bootApplication();
+    bootApplication();
 
-      shouldNotBeActive('#page-link');
-      Ember.run(router, 'handleURL', '/?page=5');
-      shouldBeActive('#page-link');
-
+    shouldNotBeActive('#page-link');
+    Ember.run(router, 'handleURL', '/?page=5');
+    shouldBeActive('#page-link');
   });
 
   test("The {{link-to}} applies active class when query-param is array", function() {
