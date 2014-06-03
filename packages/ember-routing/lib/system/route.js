@@ -337,8 +337,7 @@ var Route = EmberObject.extend(ActionHandler, {
           var qp = qpMeta.qps[i],
               route = qp.route,
               controller = route.controller,
-              presentKey = qp.urlKey in params && qp.urlKey ||
-                           qp.scoped in params && qp.scoped,
+              presentKey = qp.urlKey in params && qp.urlKey,
               changes = controller._queryParamChangesDuringSuspension;
 
           // Do a reverse lookup to see if the changed query
@@ -1531,25 +1530,21 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       if (!controllerClass) { return; }
 
       var controllerProto = controllerClass.proto(),
-          queryParams = get(controllerProto, 'queryParams'),
-          cachedProperties = get(controllerProto, 'cachedProperties') || {};
+          queryParams = get(controllerProto, 'queryParams');
 
-      if (!queryParams || queryParams.length === 0) { return; }
+      if (!queryParams || !queryParams.length) { return; }
+
+      var qpProps = {};
+      for (var i = 0, len =  queryParams.length; i < len; ++i) {
+        this._accumulateQueryParamDescriptors(queryParams[i], qpProps);
+      }
 
       var qps = [], map = {};
-      for (var i = queryParams.length - 1; i >= 0; --i) {
-        var queryParamMapping = queryParams[i],
-            parts = queryParamMapping.split(':'),
-            propName = parts[0];
+      for (var propName in qpProps) {
+        if (!qpProps.hasOwnProperty(propName)) { continue; }
 
-        if (map[propName]) {
-          // We've already configured a query param for this
-          // controller property; skip (this is useful for using
-          // mixins with query param definitions and overriding url keys).
-          continue;
-        }
-
-        var urlKey = parts[1] || this.serializeQueryParamKey(propName),
+        var desc = qpProps[propName],
+            urlKey = desc.as,
             defaultValue = get(controllerProto, propName);
 
         if (isArray(defaultValue)) {
@@ -1559,7 +1554,6 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         var type = typeOf(defaultValue),
             defaultValueSerialized = this.serializeQueryParam(defaultValue, urlKey, type),
             fprop = controllerName + ':' + propName,
-            scoped = controllerName + '[' + urlKey + ']',
             qp = {
               def: defaultValue,
               sdef: defaultValueSerialized,
@@ -1567,23 +1561,13 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
               urlKey: urlKey,
               prop: propName,
               fprop: fprop,
-              scoped: scoped,
               ctrl: controllerName,
               svalue: defaultValueSerialized,
-              cacheType: get(cachedProperties, propName) || 'model',
+              cacheType: desc.scope,
               route: this
             };
 
-        // Construct all the different ways this query param
-        // can be referenced, either from link-to or transitionTo:
-        // - {{link-to (query-params page=5)}}
-        // - {{link-to (query-params articles:page=5)}}
-        // - {{link-to (query-params articles_page=5)}}
-        // - {{link-to (query-params articles:articles_page=5)}}
-        // - transitionTo({ queryParams: { page: 5 } })
-        // ... etc.
-
-        map[propName] = map[urlKey] = map[fprop] = map[scoped] = qp;
+        map[propName] = map[urlKey] = map[fprop] = qp;
         qps.push(qp);
       }
 
@@ -1592,6 +1576,29 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         map: map
       };
     }),
+
+    _accumulateQueryParamDescriptors: function(_desc, accum) {
+      var desc = _desc, tmp;
+      if (typeOf(desc) === 'string') {
+        tmp = {};
+        tmp[desc] = { as: this.serializeQueryParamKey(desc) };
+        desc = tmp;
+      }
+
+      for (var key in desc) {
+        if (!desc.hasOwnProperty(key)) { return; }
+
+        var singleDesc = desc[key];
+        if (typeOf(singleDesc) === 'string') {
+          singleDesc = { as: singleDesc };
+        }
+
+        tmp = accum[key] || { as: key, scope: 'model' };
+        merge(tmp, singleDesc);
+
+        accum[key] = tmp;
+      }
+    },
 
     mergedProperties: ['queryParams'],
 
@@ -1817,11 +1824,12 @@ function generateOutletTeardown(parentView, outlet) {
 }
 
 function toggleQueryParamObservers(route, controller, enable) {
-  var queryParams = get(controller, 'queryParams'), i, len,
+  var qps = get(route, '_qp.qps'), i, len,
       method = enable ? 'addObserver' : 'removeObserver';
 
-  for (i = 0, len = queryParams.length; i < len; ++i) {
-    var prop = queryParams[i].split(':')[0];
+  if (!qps) { return; }
+  for (i = 0, len = qps.length; i < len; ++i) {
+    var prop = qps[i].prop;
     controller[method](prop,         route, route._qpChanged);
     controller[method](prop + '.[]', route, route._qpChanged);
   }

@@ -149,10 +149,11 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     equal(router.get('location.path'), "/?foo=987");
   });
 
-  test("Query params can map to different url keys with colon syntax.", function() {
+  test("Query params can map to different url keys", function() {
     App.IndexController = Ember.Controller.extend({
-      queryParams: ['foo:other_key'],
-      foo: "FOO"
+      queryParams: [{ foo: 'other_foo', bar: { as: 'other_bar' } }],
+      foo: "FOO",
+      bar: "BAR"
     });
 
     bootApplication();
@@ -161,13 +162,17 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     var controller = container.lookup('controller:index');
     setAndFlush(controller, 'foo', 'LEX');
 
-    equal(router.get('location.path'), "/?other_key=LEX");
+    equal(router.get('location.path'), "/?other_foo=LEX");
     setAndFlush(controller, 'foo', 'WOO');
-    equal(router.get('location.path'), "/?other_key=WOO");
+    equal(router.get('location.path'), "/?other_foo=WOO");
 
-    Ember.run(router, 'transitionTo', '/?other_key=NAW');
+    Ember.run(router, 'transitionTo', '/?other_foo=NAW');
     equal(controller.get('foo'), "NAW");
+
+    setAndFlush(controller, 'bar', 'NERK');
+    Ember.run(router, 'transitionTo', '/?other_bar=NERK&other_foo=NAW');
   });
+
 
   test("Routes have overridable serializeQueryParamKey hook", function() {
     App.IndexRoute = Ember.Route.extend({
@@ -1270,9 +1275,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
 
   test("'controller' stickiness shares QP state between models", function() {
     App.ArticleController.reopen({
-      cachedProperties: {
-        q: 'controller'
-      }
+      queryParams: { q: { scope: 'controller' } }
     });
 
     this.boot();
