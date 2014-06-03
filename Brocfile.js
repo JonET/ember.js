@@ -143,6 +143,7 @@ var vendoredPackages = {
   'backburner':       vendoredPackage('backburner'),
   'router':           vendoredPackage('router'),
   'route-recognizer': vendoredPackage('route-recognizer'),
+  'placeholder':      vendoredPackage('placeholder'),
 };
 
 var emberHandlebarsCompiler = pickFiles('packages/ember-handlebars-compiler/lib', {
