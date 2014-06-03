@@ -2,11 +2,12 @@ import {get} from "ember-metal/property_get";
 import {map} from "ember-metal/array";
 import {ControllerMixin} from "ember-runtime/controllers/controller";
 import {resolveParams as handlebarsResolve, handlebarsGet} from "ember-handlebars/ext";
+import {typeOf} from 'ember-metal/utils';
 
 export function routeArgs(targetRouteName, models, queryParams) {
   var args = [];
-  if (typeof targetRouteName === 'string') {
-    args.push(targetRouteName);
+  if (typeOf(targetRouteName) === 'string') {
+    args.push('' + targetRouteName);
   }
   args.push.apply(args, models);
   args.push({ queryParams: queryParams });

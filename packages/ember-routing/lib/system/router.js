@@ -390,17 +390,13 @@ var EmberRouter = EmberObject.extend(Evented, {
     });
 
     for (var key in groupedByUrlKey) {
-      var qps = groupedByUrlKey[key], qp;
+      var qps = groupedByUrlKey[key];
       if (qps.length > 1) {
-        Ember.assert(fmt("You're not allowed to have more than one controller property map to the same query param key, but both `@%` and `@%` map to `@%`. You can fix this by mapping one of the controller properties to a different query param key via the `as` config option, e.g. `@%: { as: 'other-@%' }`", [qps[0].fprop, qps[1].fprop, qps[0].urlKey, qps[0].prop, qps[0].prop]), qps.length <= 1);
-        for (var i = 0, len = qps.length; i < len; ++i) {
-          qp = qps[i].qp;
-          queryParams[qp.scoped] = qp.route.serializeQueryParam(qps[i].value, qp.urlKey, qp.type);
-        }
-      } else {
-        qp = qps[0].qp;
-        queryParams[qp.urlKey] = qp.route.serializeQueryParam(qps[0].value, qp.urlKey, qp.type);
+        var qp0 = qps[0].qp, qp1=qps[1].qp;
+        Ember.assert(fmt("You're not allowed to have more than one controller property map to the same query param key, but both `%@` and `%@` map to `%@`. You can fix this by mapping one of the controller properties to a different query param key via the `as` config option, e.g. `%@: { as: 'other-%@' }`", [qp0.fprop, qp1.fprop, qp0.urlKey, qp0.prop, qp0.prop]), false);
       }
+      var qp = qps[0].qp;
+      queryParams[qp.urlKey] = qp.route.serializeQueryParam(qps[0].value, qp.urlKey, qp.type);
     }
   },
 

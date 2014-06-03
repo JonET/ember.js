@@ -1340,12 +1340,12 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
 
   test("can remap same-named qp props", function() {
     App.ParentController = Ember.Controller.extend({
-      queryParams: 'page:parentPage',
+      queryParams: { page: 'parentPage' },
       page: 1
     });
 
     App.ParentChildController = Ember.Controller.extend({
-      queryParams: 'page:childPage',
+      queryParams: { page: 'childPage' },
       page: 1
     });
 
@@ -1383,45 +1383,19 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
 
   test("query params in the same route hierarchy with the same url key get auto-scoped", function() {
     App.ParentController = Ember.Controller.extend({
-      queryParams: 'foo:shared',
+      queryParams: { foo: 'shared' },
       foo: 1
     });
 
     App.ParentChildController = Ember.Controller.extend({
-      queryParams: 'bar:shared',
+      queryParams: { bar: 'shared' },
       bar: 1
     });
 
-    this.boot();
-
-    equal(router.get('location.path'), '/parent/child');
-
-    var parentController = container.lookup('controller:parent');
-    var parentChildController = container.lookup('controller:parent.child');
-
-    setAndFlush(parentController, 'foo', 2);
-    equal(router.get('location.path'), '/parent/child?parent[shared]=2');
-    setAndFlush(parentController, 'foo', 1);
-    equal(router.get('location.path'), '/parent/child');
-
-    setAndFlush(parentChildController, 'bar', 2);
-    equal(router.get('location.path'), '/parent/child?parent.child[shared]=2');
-    setAndFlush(parentChildController, 'bar', 1);
-    equal(router.get('location.path'), '/parent/child');
-
-    Ember.run(function() {
-      parentController.set('foo', 2);
-      parentChildController.set('bar', 2);
-    });
-
-    equal(router.get('location.path'), '/parent/child?parent.child[shared]=2&parent[shared]=2');
-
-    Ember.run(function() {
-      parentController.set('foo', 1);
-      parentChildController.set('bar', 1);
-    });
-
-    equal(router.get('location.path'), '/parent/child');
+    var self = this;
+    expectAssertion(function() {
+      self.boot();
+    }, "You're not allowed to have more than one controller property map to the same query param key, but both `parent:foo` and `parent.child:bar` map to `shared`. You can fix this by mapping one of the controller properties to a different query param key via the `as` config option, e.g. `foo: { as: 'other-foo' }`");
   });
 
   test("Support shared but overridable mixin pattern", function() {
@@ -1432,7 +1406,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     });
 
     App.ParentController = Ember.Controller.extend(HasPage, {
-      queryParams: 'page:yespage'
+      queryParams: { page: 'yespage' },
     });
 
     App.ParentChildController = Ember.Controller.extend(HasPage);
