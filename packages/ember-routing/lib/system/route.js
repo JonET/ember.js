@@ -365,7 +365,7 @@ var Route = EmberObject.extend(ActionHandler, {
           var handlerInfo = handlerInfoFor(route, handlerInfos);
 
           var names = handlerInfo._names;
-          var bucketKey = appCache.calculateBucketKey(qp, handlerInfo);
+          var bucketKey = appCache.calculateBucketKey(qp, handlerInfo, handlerInfos);
 
           // Don't allocate buckets for QPs that have default values.
           var thisQueryParamHasDefaultValue = (svalue === qp.sdef),

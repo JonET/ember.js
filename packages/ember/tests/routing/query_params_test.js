@@ -1120,7 +1120,9 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       sharedSetup();
 
       App.Router.map(function() {
-        this.route('article', { path: '/a/:id' });
+        this.resource('article', { path: '/a/:id' }, function() {
+          this.resource('comments');
+        });
       });
 
       var articles = this.articles = Ember.A([{ id: 'a-1' }, { id: 'a-2' }, { id: 'a-3' }]);
@@ -1145,6 +1147,11 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         queryParams: ['q', 'z'],
         q: 'wat',
         z: 0
+      });
+
+      App.CommentsController = Ember.ArrayController.extend({
+        queryParams: 'page',
+        page: 1
       });
 
       Ember.TEMPLATES.application = compile("{{#each a in articles}} {{link-to 'Article' 'article' a id=a.id}} {{/each}}");
@@ -1316,6 +1323,67 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     equal(this.$link2.attr('href'), '/a/a-2?q=woot');
     equal(this.$link3.attr('href'), '/a/a-3?q=woot&z=123');
   });
+
+  test("'model' stickiness is scoped to current or first non-dynamic parent route", function() {
+    this.boot();
+
+    Ember.run(router, 'transitionTo', 'comments', '123');
+
+    var commentsCtrl = container.lookup('controller:comments');
+    equal(commentsCtrl.get('page'), 1);
+    equal(router.get('location.path'), '/a/123/comments');
+
+    setAndFlush(commentsCtrl, 'page', 2);
+    equal(router.get('location.path'), '/a/123/comments?page=2');
+
+    setAndFlush(commentsCtrl, 'page', 3);
+    equal(router.get('location.path'), '/a/123/comments?page=3');
+
+    Ember.run(router, 'transitionTo', 'comments', '456');
+    equal(commentsCtrl.get('page'), 1);
+    equal(router.get('location.path'), '/a/456/comments');
+
+
+
+
+
+    /*
+    Ember.run(this.$link1, 'click');
+
+
+    equal(this.$link1.attr('href'), '/a/a-1?q=lol');
+    equal(this.$link2.attr('href'), '/a/a-2?q=lol');
+    equal(this.$link3.attr('href'), '/a/a-3?q=lol');
+
+    Ember.run(this.$link2, 'click');
+
+    equal(this.controller.get('q'), 'lol');
+    equal(this.controller.get('z'), 0);
+    deepEqual(this.controller.get('model'), { id: 'a-2' });
+
+    equal(this.$link1.attr('href'), '/a/a-1?q=lol');
+    equal(this.$link2.attr('href'), '/a/a-2?q=lol');
+    equal(this.$link3.attr('href'), '/a/a-3?q=lol');
+
+    this.expectedModelHookParams = { id: 'a-3', q: 'haha', z: 123 };
+    handleURL('/a/a-3?q=haha&z=123');
+
+    deepEqual(this.controller.get('model'), { id: 'a-3' });
+    equal(this.controller.get('q'), 'haha');
+    equal(this.controller.get('z'), 123);
+
+    equal(this.$link1.attr('href'), '/a/a-1?q=haha');
+    equal(this.$link2.attr('href'), '/a/a-2?q=haha');
+    equal(this.$link3.attr('href'), '/a/a-3?q=haha&z=123');
+
+    setAndFlush(this.controller, 'q', 'woot');
+
+    equal(this.$link1.attr('href'), '/a/a-1?q=woot');
+    equal(this.$link2.attr('href'), '/a/a-2?q=woot');
+    equal(this.$link3.attr('href'), '/a/a-3?q=woot&z=123');
+    */
+  });
+
 
   QUnit.module("Query Params - overlapping query param property names", {
     setup: function() {

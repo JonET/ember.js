@@ -485,6 +485,7 @@ var EmberRouter = EmberObject.extend(Evented, {
 
     for (var i = 0, len = handlerInfos.length; i < len; ++i) {
       var handlerInfo = handlerInfos[i],
+          parentHandlerInfo = handlerInfo[i-1],
           route = handlerInfo.handler,
           qpMeta = get(route, '_qp');
 
@@ -502,7 +503,7 @@ var EmberRouter = EmberObject.extend(Evented, {
             delete queryParams[presentProp];
           }
         } else {
-          var bucketKey = appCache.calculateBucketKey(qp, handlerInfo);
+          var bucketKey = appCache.calculateBucketKey(qp, handlerInfo, handlerInfos);
 
           if (appCache.has(bucketKey)) {
             var bucket = appCache.lookup(bucketKey);
