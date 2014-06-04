@@ -288,7 +288,7 @@ test("The {{link-to}} helper supports custom, nested, currentWhen", function() {
   equal(Ember.$('#other-link.active', '#qunit-fixture').length, 1, "The link is active since currentWhen is a parent route");
 });
 
-test("The {{link-to}} helper does not disregards currentWhen when it is given explicitly for a resource", function() {
+test("The {{link-to}} helper does not disregard currentWhen when it is given explicitly for a resource", function() {
   Router.map(function(match) {
     this.resource("index", { path: "/" }, function() {
       this.route("about");
@@ -1478,7 +1478,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       shouldNotBeActive('#empty-link');
   });
 
-  test("The {{link-to}} applies active class to parent route", function() {
+  test("The {{link-to}} helper applies active class to parent route", function() {
     App.Router.map(function() {
       this.resource('parent', function() {
         this.route('child');
@@ -1500,6 +1500,34 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
     shouldNotBeActive('#parent-link');
     shouldNotBeActive('#parent-child-link');
     Ember.run(router, 'handleURL', '/parent/child?foo=dog');
+    shouldBeActive('#parent-link');
+  });
+
+  test("The {{link-to}} helper disregards query-params in activeness computation when currentWhen specified", function() {
+    App.Router.map(function() {
+      this.route('parent');
+      this.route('other');
+    });
+
+    Ember.TEMPLATES.application = Ember.Handlebars.compile(
+        "{{#link-to 'parent' (query-params page=1) currentWhen='parent' id='parent-link'}}Parent{{/link-to}} ");
+
+    App.ParentController = Ember.ObjectController.extend({
+      queryParams: ['page'],
+      page: 1
+    });
+
+    bootApplication();
+    equal(Ember.$('#parent-link').attr('href'), '/parent');
+    shouldNotBeActive('#parent-link');
+    Ember.run(router, 'handleURL', '/parent?page=2');
+    equal(Ember.$('#parent-link').attr('href'), '/parent');
+    shouldBeActive('#parent-link');
+
+    var parentController = container.lookup('controller:parent');
+    equal(parentController.get('page'), 2);
+    Ember.run(parentController, 'set', 'page', 3);
+    equal(router.get('location.path'), '/parent?page=3');
     shouldBeActive('#parent-link');
   });
 }
