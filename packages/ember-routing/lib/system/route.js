@@ -6,7 +6,8 @@ import getProperties from "ember-metal/get_properties";
 import EnumerableUtils from "ember-metal/enumerable_utils";
 import { isNone } from "ember-metal/is_none";
 import { computed } from "ember-metal/computed";
-import { typeOf } from "ember-metal/utils";
+import merge from "ember-metal/merge";
+import { isArray, typeOf } from "ember-metal/utils";
 import run from "ember-metal/run_loop";
 import keys from "ember-runtime/keys";
 import copy from "ember-runtime/copy";
@@ -17,6 +18,7 @@ import {
 import EmberObject from "ember-runtime/system/object";
 import ActionHandler from "ember-runtime/mixins/action_handler";
 import { generateController } from "ember-routing/system/controller_for";
+import { stashParamNames } from "ember-routing/helpers/shared";
 
 /**
 @module ember
@@ -25,6 +27,8 @@ import { generateController } from "ember-routing/system/controller_for";
 
 var a_forEach = EnumerableUtils.forEach;
 var a_replace = EnumerableUtils.replace;
+var a_find    = EnumerableUtils.find;
+
 
 /**
   The `Ember.Route` class is used to define individual routes. Refer to
@@ -317,79 +321,98 @@ var Route = EmberObject.extend(ActionHandler, {
 
     finalizeQueryParamChange: function(params, finalParams, transition) {
       if (Ember.FEATURES.isEnabled("query-params-new")) {
-        // In this hook we receive all the current values of
-        // serialized query params. We need to take these values
-        // and distribute them in their deserialized form into
-        // controllers and remove any that no longer belong in
-        // this route hierarchy.
+        if (this.routeName !== 'application') { return true; }
 
-        var controller = this.controller,
-            changes = controller._queryParamChangesDuringSuspension,
-            qpMeta = get(this, '_qp');
+        // Transition object is absent for intermediate transitions.
+        if (!transition) { return; }
 
-        // Loop through all the query params that
-        // this controller knows about.
+        var appCache = this._bucketCache,
+            handlerInfos = transition.state.handlerInfos,
+            qpMeta = this.router._queryParamsFor(handlerInfos[handlerInfos.length-1].name),
+            replaceUrl;
 
-        if (qpMeta) {
-          for (var i = 0, len = qpMeta.qps.length; i < len; ++i) {
-            var qp = qpMeta.qps[i],
-                qpProvided = qp.urlKey in params;
+        stashParamNames(this.router, handlerInfos);
 
-            // Do a reverse lookup to see if the changed query
-            // param URL key corresponds to a QP property on
-            // this controller.
-            var value, svalue;
-            if (changes && qp.urlKey in changes) {
-              // Controller overrode this value in setupController
-              value = get(controller, qp.prop);
-              svalue = this.serializeQueryParam(value, qp.urlKey, qp.type);
+        for (var i = 0, len = qpMeta.qps.length; i < len; ++i) {
+          var qp = qpMeta.qps[i],
+              route = qp.route,
+              controller = route.controller,
+              presentKey = qp.urlKey in params && qp.urlKey,
+              changes = controller._queryParamChangesDuringSuspension;
+
+          // Do a reverse lookup to see if the changed query
+          // param URL key corresponds to a QP property on
+          // this controller.
+          var value, svalue;
+          if (changes && qp.urlKey in changes) {
+            // Controller overrode this value in setupController
+            value = get(controller, qp.prop);
+            svalue = route.serializeQueryParam(value, qp.urlKey, qp.type);
+          } else {
+            if (presentKey) {
+              svalue = params[presentKey];
+              value = route.deserializeQueryParam(svalue, qp.urlKey, qp.type);
             } else {
-              if (qpProvided) {
-                svalue = params[qp.urlKey];
-                value = this.deserializeQueryParam(svalue, qp.urlKey, qp.type);
-              } else {
-                // No QP provided; use default value.
-                svalue = qp.sdef;
-                value = qp.def;
+              // No QP provided; use default value.
+              svalue = qp.sdef;
+              value = qp.def;
+              if (isArray(value)) {
+                value = Ember.A(value.slice());
+              }
+            }
+          }
+
+          var handlerInfo = handlerInfoFor(route, handlerInfos);
+
+          var names = handlerInfo._names;
+          var bucketKey = appCache.calculateBucketKey(qp, handlerInfo, handlerInfos);
+
+          // Don't allocate buckets for QPs that have default values.
+          var thisQueryParamHasDefaultValue = (svalue === qp.sdef),
+              needToUpdateCache = (!thisQueryParamHasDefaultValue || appCache.has(bucketKey));
+          if (needToUpdateCache) {
+            appCache.stash(bucketKey, qp.prop, value);
+          }
+
+          var thisQueryParamChanged = (svalue !== qp.svalue);
+          if (thisQueryParamChanged) {
+            var options = get(route.queryParams, qp.urlKey) || {};
+
+            if (transition.queryParamsOnly && replaceUrl !== false) {
+              var replaceConfigValue = get(options, 'replace');
+              if (replaceConfigValue) {
+                replaceUrl = true;
+              } else if (replaceConfigValue === false) {
+                // Explicit pushState wins over any other replaceStates.
+                replaceUrl = false;
               }
             }
 
-            // Delete from params so that parent routes
-            // don't also try to respond to changes to
-            // non-fully-qualified query param name changes
-            // (e.g. if two controllers in the same hiearchy
-            // specify a `page` query param)
-            delete params[qp.urlKey];
+            // Update controller without firing QP observers.
+            controller._finalizingQueryParams = true;
+            set(controller, qp.prop, value);
+            controller._finalizingQueryParams = false;
+          }
 
-            // Now check if this value actually changed.
-            if (svalue !== qp.svalue) {
-              var options = get(this.queryParams, qp.urlKey) || {};
+          // Stash current serialized value of controller.
+          qp.svalue = svalue;
 
-              // Only use replace if transition wouldn't otherwise change the url
-              if (!transition.targetName && get(options, 'replace')) {
-                transition.method('replace');
-              }
-
-              // Update QP cache
-              qp.svalue = svalue;
-              qp.value = value;
-
-              // Update controller without firing QP observers.
-              controller._finalizingQueryParams = true;
-              set(controller, qp.prop, qp.value);
-              controller._finalizingQueryParams = false;
-            }
-
+          if (!thisQueryParamHasDefaultValue) {
             finalParams.push({
-              value: qp.svalue,
-              visible: qp.svalue !== qp.sdef,
-              key: qp.urlKey
+              value: svalue,
+              visible: true,
+              key: presentKey || qp.urlKey
             });
           }
-          controller._queryParamChangesDuringSuspension = null;
         }
-        // Bubble so that parent routes can claim QPs.
-        return true;
+
+        if (replaceUrl) {
+          transition.method('replace');
+        }
+
+        a_forEach(qpMeta.qps, function(qp) {
+          qp.route.controller._queryParamChangesDuringSuspension = null;
+        });
       }
     }
   },
@@ -1508,39 +1531,42 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       var controllerProto = controllerClass.proto(),
           queryParams = get(controllerProto, 'queryParams');
 
-      if (!queryParams || queryParams.length === 0) { return; }
+      if (!queryParams || !queryParams.length) { return; }
+
+      var qpProps = {};
+      for (var i = 0, len =  queryParams.length; i < len; ++i) {
+        this._accumulateQueryParamDescriptors(queryParams[i], qpProps);
+      }
 
       var qps = [], map = {};
-      for (var i = 0, len = queryParams.length; i < len; ++i) {
-        var queryParamMapping = queryParams[i],
-            parts = queryParamMapping.split(':'),
-            propName = parts[0],
-            urlKey = parts[1] || propName,
-            defaultValue = get(controllerProto, propName),
-            type = typeOf(defaultValue),
+      for (var propName in qpProps) {
+        if (!qpProps.hasOwnProperty(propName)) { continue; }
+
+        var desc = qpProps[propName],
+            urlKey = desc.as,
+            defaultValue = get(controllerProto, propName);
+
+        if (isArray(defaultValue)) {
+          defaultValue = Ember.A(defaultValue.slice());
+        }
+
+        var type = typeOf(defaultValue),
             defaultValueSerialized = this.serializeQueryParam(defaultValue, urlKey, type),
+            fprop = controllerName + ':' + propName,
             qp = {
               def: defaultValue,
               sdef: defaultValueSerialized,
               type: type,
               urlKey: urlKey,
               prop: propName,
+              fprop: fprop,
               ctrl: controllerName,
-              value: defaultValue,
               svalue: defaultValueSerialized,
+              cacheType: desc.scope,
               route: this
             };
 
-        // Construct all the different ways this query param
-        // can be referenced, either from link-to or transitionTo:
-        // - {{link-to (query-params page=5)}}
-        // - {{link-to (query-params articles:page=5)}}
-        // - {{link-to (query-params articles_page=5)}}
-        // - {{link-to (query-params articles:articles_page=5)}}
-        // - transitionTo({ queryParams: { page: 5 } })
-        // ... etc.
-
-        map[propName] = map[urlKey] = map[controllerName + ':' + propName] = qp;
+        map[propName] = map[urlKey] = map[fprop] = qp;
         qps.push(qp);
       }
 
@@ -1549,6 +1575,29 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         map: map
       };
     }),
+
+    _accumulateQueryParamDescriptors: function(_desc, accum) {
+      var desc = _desc, tmp;
+      if (typeOf(desc) === 'string') {
+        tmp = {};
+        tmp[desc] = { as: this.serializeQueryParamKey(desc) };
+        desc = tmp;
+      }
+
+      for (var key in desc) {
+        if (!desc.hasOwnProperty(key)) { return; }
+
+        var singleDesc = desc[key];
+        if (typeOf(singleDesc) === 'string') {
+          singleDesc = { as: singleDesc };
+        }
+
+        tmp = accum[key] || { as: key, scope: 'model' };
+        merge(tmp, singleDesc);
+
+        accum[key] = tmp;
+      }
+    },
 
     mergedProperties: ['queryParams'],
 
@@ -1560,15 +1609,17 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       }
 
       var transition = this.router.router.activeTransition,
-          params, queryParams;
+          state = transition ? transition.state : this.router.router.state,
+          params = {};
 
-      if (transition) {
-        params = transition.params[name] || {};
-        queryParams = transition.queryParams;
-      } else {
-        var state = this.router.router.state;
-        params = state.params[name] || {};
-        queryParams = state.queryParams;
+      merge(params, state.params[name]);
+
+      if (!state.fullQueryParams) {
+        state.fullQueryParams = {};
+        merge(state.fullQueryParams, state.queryParams);
+
+        var targetRouteName = state.handlerInfos[state.handlerInfos.length-1].name;
+        this.router._deserializeQueryParams(targetRouteName, state.fullQueryParams);
       }
 
       var qpMeta = get(route, '_qp');
@@ -1578,33 +1629,22 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         return params;
       }
 
-      var qps = qpMeta.qps, map = qpMeta.map, qp;
-
-      // Loop through all the query params defined on the controller
+      // Copy over all the query params for this route/controller into params hash.
+      // TODO: is this correct? I think this won't do model dep state.
+      var qps = qpMeta.qps;
       for (var i = 0, len = qps.length; i < len; ++i) {
         // Put deserialized qp on params hash.
-        qp = qps[i];
-        params[qp.urlKey] = qp.value;
-      }
-
-      // Override params hash values with any input query params
-      // from the transition attempt.
-      for (var urlKey in queryParams) {
-        // Ignore any params not for this route.
-        if (!(urlKey in map)) { continue; }
-
-        var svalue = queryParams[urlKey];
-        qp = map[urlKey];
-        if (svalue === null) {
-          // Query param was removed from address bar.
-          svalue = qp.sdef;
+        var qp = qps[i];
+        if (!(qp.prop in params)) {
+          params[qp.prop] = state.fullQueryParams[qp.prop] || qp.def;
         }
-
-        // Deserialize and stash on params.
-        params[urlKey] = route.deserializeQueryParam(svalue, urlKey, qp.type);
       }
 
       return params;
+    },
+
+    serializeQueryParamKey: function(controllerPropertyName) {
+      return controllerPropertyName;
     },
 
     serializeQueryParam: function(value, urlKey, defaultValueType) {
@@ -1651,9 +1691,9 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
         return;
       }
 
-      var value = copy(get(controller, propName));
+      var value = get(controller, propName);
 
-      this.router._queuedQPChanges[qp.prop] = value;
+      this.router._queuedQPChanges[qp.fprop] = value;
       run.once(this, this._fireQueryParamTransition);
     },
 
@@ -1665,16 +1705,17 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
 }
 
 function parentRoute(route) {
-  var handlerInfos = route.router.router.state.handlerInfos;
+  var handlerInfo = handlerInfoFor(route, route.router.router.state.handlerInfos, -1);
+  return handlerInfo && handlerInfo.handler;
+}
 
+function handlerInfoFor(route, handlerInfos, _offset) {
   if (!handlerInfos) { return; }
 
-  var parent, current;
-
+  var offset = _offset || 0, current;
   for (var i=0, l=handlerInfos.length; i<l; i++) {
     current = handlerInfos[i].handler;
-    if (current === route) { return parent; }
-    parent = current;
+    if (current === route) { return handlerInfos[i+offset]; }
   }
 }
 
@@ -1782,11 +1823,12 @@ function generateOutletTeardown(parentView, outlet) {
 }
 
 function toggleQueryParamObservers(route, controller, enable) {
-  var queryParams = get(controller, 'queryParams'), i, len,
+  var qps = get(route, '_qp.qps'), i, len,
       method = enable ? 'addObserver' : 'removeObserver';
 
-  for (i = 0, len = queryParams.length; i < len; ++i) {
-    var prop = queryParams[i].split(':')[0];
+  if (!qps) { return; }
+  for (i = 0, len = qps.length; i < len; ++i) {
+    var prop = qps[i].prop;
     controller[method](prop,         route, route._qpChanged);
     controller[method](prop + '.[]', route, route._qpChanged);
   }

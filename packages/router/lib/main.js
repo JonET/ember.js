@@ -380,6 +380,49 @@ define("router/router",
         return this.recognizer.hasRoute(route);
       },
 
+      queryParamsTransition: function(changelist, wasTransitioning, oldState, newState) {
+        var router = this;
+
+        // This is a little hacky but we need some way of storing
+        // changed query params given that no activeTransition
+        // is guaranteed to have occurred.
+        this._changedQueryParams = changelist.changed;
+        for (var k in changelist.removed) {
+          if (changelist.removed.hasOwnProperty(k)) {
+            this._changedQueryParams[k] = null;
+          }
+        }
+        fireQueryParamDidChange(this, newState, changelist);
+        this._changedQueryParams = null;
+
+        if (!wasTransitioning && this.activeTransition) {
+          // One of the handlers in queryParamsDidChange
+          // caused a transition. Just return that transition.
+          return this.activeTransition;
+        } else {
+          // Running queryParamsDidChange didn't change anything.
+          // Just update query params and be on our way.
+
+          // We have to return a noop transition that will
+          // perform a URL update at the end. This gives
+          // the user the ability to set the url update
+          // method (default is replaceState).
+          var newTransition = new Transition(this);
+          newTransition.queryParamsOnly = true;
+
+          oldState.queryParams = finalizeQueryParamChange(this, newState.handlerInfos, newState.queryParams, newTransition);
+
+          newTransition.promise = newTransition.promise.then(function(result) {
+            updateURL(newTransition, oldState, true);
+            if (router.didTransition) {
+              router.didTransition(router.currentHandlerInfos);
+            }
+            return result;
+          }, null, promiseLabel("Transition complete"));
+          return newTransition;
+        }
+      },
+
       // NOTE: this doesn't really belong here, but here
       // it shall remain until our ES6 transpiler can
       // handle cyclical deps.
@@ -392,48 +435,14 @@ define("router/router",
 
         try {
           var newState = intent.applyToState(oldState, this.recognizer, this.getHandler, isIntermediate);
+          var queryParamChangelist = getChangelist(oldState.queryParams, newState.queryParams);
 
           if (handlerInfosEqual(newState.handlerInfos, oldState.handlerInfos)) {
 
             // This is a no-op transition. See if query params changed.
-            var queryParamChangelist = getChangelist(oldState.queryParams, newState.queryParams);
             if (queryParamChangelist) {
-
-              // This is a little hacky but we need some way of storing
-              // changed query params given that no activeTransition
-              // is guaranteed to have occurred.
-              this._changedQueryParams = queryParamChangelist.changed;
-              for (var k in queryParamChangelist.removed) {
-                if (queryParamChangelist.removed.hasOwnProperty(k)) {
-                  this._changedQueryParams[k] = null;
-                }
-              }
-              trigger(this, newState.handlerInfos, true, ['queryParamsDidChange', queryParamChangelist.changed, queryParamChangelist.all, queryParamChangelist.removed]);
-              this._changedQueryParams = null;
-
-              if (!wasTransitioning && this.activeTransition) {
-                // One of the handlers in queryParamsDidChange
-                // caused a transition. Just return that transition.
-                return this.activeTransition;
-              } else {
-                // Running queryParamsDidChange didn't change anything.
-                // Just update query params and be on our way.
-
-                // We have to return a noop transition that will
-                // perform a URL update at the end. This gives
-                // the user the ability to set the url update
-                // method (default is replaceState).
-                newTransition = new Transition(this);
-
-                oldState.queryParams = finalizeQueryParamChange(this, newState.handlerInfos, newState.queryParams, newTransition);
-
-                newTransition.promise = newTransition.promise.then(function(result) {
-                  updateURL(newTransition, oldState, true);
-                  if (router.didTransition) {
-                    router.didTransition(router.currentHandlerInfos);
-                  }
-                  return result;
-                }, null, promiseLabel("Transition complete"));
+              newTransition = this.queryParamsTransition(queryParamChangelist, wasTransitioning, oldState, newState);
+              if (newTransition) {
                 return newTransition;
               }
             }
@@ -466,6 +475,8 @@ define("router/router",
           if (!wasTransitioning) {
             notifyExistingHandlers(this, newState, newTransition);
           }
+
+          fireQueryParamDidChange(this, newState, queryParamChangelist);
 
           return newTransition;
         } catch(e) {
@@ -617,13 +628,17 @@ define("router/router",
         return this.recognizer.generate(handlerName, params);
       },
 
-      isActive: function(handlerName) {
+      applyIntent: function(handlerName, contexts) {
+        var intent = new NamedTransitionIntent({
+          name: handlerName,
+          contexts: contexts
+        });
 
-        var partitionedArgs   = extractQueryParams(slice.call(arguments, 1)),
-            contexts          = partitionedArgs[0],
-            queryParams       = partitionedArgs[1],
-            activeQueryParams  = this.state.queryParams;
+        var state = this.activeTransition && this.activeTransition.state || this.state;
+        return intent.applyToState(state, this.recognizer, this.getHandler);
+      },
 
+      isActiveIntent: function(handlerName, contexts, queryParams) {
         var targetHandlerInfos = this.state.handlerInfos,
             found = false, names, object, handlerInfo, handlerObj, i, len;
 
@@ -654,9 +669,16 @@ define("router/router",
 
         var newState = intent.applyToHandlers(state, recogHandlers, this.getHandler, targetHandler, true, true);
 
+        var handlersEqual = handlerInfosEqual(newState.handlerInfos, state.handlerInfos);
+        if (!queryParams || !handlersEqual) {
+          return handlersEqual;
+        }
+
         // Get a hash of QPs that will still be active on new route
         var activeQPsOnNewHandler = {};
         merge(activeQPsOnNewHandler, queryParams);
+
+        var activeQueryParams  = this.state.queryParams;
         for (var key in activeQueryParams) {
           if (activeQueryParams.hasOwnProperty(key) &&
               activeQPsOnNewHandler.hasOwnProperty(key)) {
@@ -664,8 +686,12 @@ define("router/router",
           }
         }
 
-        return handlerInfosEqual(newState.handlerInfos, state.handlerInfos) &&
-               !getChangelist(activeQPsOnNewHandler, queryParams);
+        return handlersEqual && !getChangelist(activeQPsOnNewHandler, queryParams);
+      },
+
+      isActive: function(handlerName) {
+        var partitionedArgs = extractQueryParams(slice.call(arguments, 1));
+        return this.isActiveIntent(handlerName, partitionedArgs[0], partitionedArgs[1]);
       },
 
       trigger: function(name) {
@@ -689,6 +715,29 @@ define("router/router",
         trigger(this, handlerInfos, true, ['willLeave', newTransition, leavingChecker]);
       }
     };
+
+    /**
+      @private
+
+      Fires queryParamsDidChange event
+    */
+    function fireQueryParamDidChange(router, newState, queryParamChangelist) {
+      // If queryParams changed trigger event
+      if (queryParamChangelist) {
+
+        // This is a little hacky but we need some way of storing
+        // changed query params given that no activeTransition
+        // is guaranteed to have occurred.
+        router._changedQueryParams = queryParamChangelist.changed;
+        for (var i in queryParamChangelist.removed) {
+          if (queryParamChangelist.removed.hasOwnProperty(i)) {
+            router._changedQueryParams[i] = null;
+          }
+        }
+        trigger(router, newState.handlerInfos, true, ['queryParamsDidChange', queryParamChangelist.changed, queryParamChangelist.all, queryParamChangelist.removed]);
+        router._changedQueryParams = null;
+      }
+    }
 
     /**
       @private
@@ -1233,7 +1282,6 @@ define("router/transition-intent/named-transition-intent",
           this.invalidateChildren(newState.handlerInfos, invalidateIndex);
         }
 
-        merge(newState.queryParams, oldState.queryParams);
         merge(newState.queryParams, this.queryParams || {});
 
         return newState;
@@ -1593,6 +1641,7 @@ define("router/transition",
       resolvedModels: null,
       isActive: true,
       state: null,
+      queryParamsOnly: false,
 
       isTransition: true,
 
